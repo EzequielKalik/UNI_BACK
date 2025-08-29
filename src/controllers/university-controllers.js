@@ -115,5 +115,71 @@ function nowTimestamp(d = new Date()) {
 //   // Puedes usar sanitizeFilename, getExtFrom, padId y nowTimestamp aquí
 //   // ...
 // });
+// ---------- NUEVA RUTA: subir foto ----------
+router.post('/:id/photo', authenticateToken, upload.single('image'), async (req, res) => {
+    const { id } = req.params;
+  
+    try {
+      // 1) Verificar que exista la universidad
+      const universidad = await service.getById(Number(id));
+      if (!universidad) {
+        return res.status(StatusCodes.NOT_FOUND)
+          .json({ success: false, message: `Universidad no encontrada (id:${id})` });
+      }
+  
+      // 2) Validar archivo
+      if (!req.file) {
+        return res.status(StatusCodes.BAD_REQUEST)
+          .json({ success: false, message: 'No se recibió el archivo. Usa el campo "image".' });
+      }
+  
+      // 3) Armar nombre único: id + timestamp + originalfilename + ext
+      const ext         = getExtFrom(req.file);
+      const original    = sanitizeFilename(req.file.originalname || `photo${ext}`);
+      const paddedId    = String(id).padStart(6, '0'); // Mantengo tu formato
+      const timestamp   = nowTimestamp();
+      const uniqueName  = `${paddedId}-${timestamp}-${original}`;
+  
+      // 4) Guardar en filesystem (uploads/universities)
+      const dir         = path.join(process.cwd(), 'uploads', 'universities');
+      const finalPath   = path.join(dir, uniqueName);
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(finalPath, req.file.buffer);
+  
+      // 5) Actualizar universidad con la URL pública
+      const publicUrl = `/static/universities/${uniqueName}`;
+      universidad.imagen = publicUrl;
+  
+      const rowsAffected = await service.update(universidad); // Tu TP usa update, no updateAsync
+      if (rowsAffected && rowsAffected !== 0) {
+        return res.status(StatusCodes.CREATED).json({
+          success: true,
+          id,
+          filename: uniqueName,
+          url: publicUrl
+        });
+      } else {
+        // Si no se pudo actualizar la DB, limpiar el archivo creado
+        await fs.rm(finalPath, { force: true });
+        return res.status(StatusCodes.INTERNAL_SERVER_ERROR)
+          .json({ success: false, message: `No se pudo actualizar la universidad (id:${id}).` });
+      }
+    } catch (err) {
+      console.error(err);
+      return res.status(StatusCodes.INTERNAL_SERVER_ERROR)
+        .json({ success: false, message: 'Error al subir la imagen.' });
+    }
+    // --- Helpers que faltan ---
+    function nowTimestamp(d = new Date()) {
+    const yyyy = d.getFullYear();
+    const MM   = String(d.getMonth() + 1).padStart(2, '0');
+    const dd   = String(d.getDate()).padStart(2, '0');
+    const HH   = String(d.getHours()).padStart(2, '0');
+    const mm   = String(d.getMinutes()).padStart(2, '0');
+    const ss   = String(d.getSeconds()).padStart(2, '0');
+    const SSS  = String(d.getMilliseconds()).padStart(3, '0');
+    return `${yyyy}${MM}${dd}${HH}${mm}${ss}${SSS}`;
+  }
+  });
 
 export default router;
